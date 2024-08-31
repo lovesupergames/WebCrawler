@@ -54,7 +54,7 @@ func TestNormalizeURL(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			actual, err := normalizeURL(tc.inputURL)
+			actual, err := NormalizeURL(tc.inputURL)
 			if err != nil && !tc.err {
 				t.Errorf("Test %v - '%s' FAIL: unexpected error: %v", i, tc.name, err)
 				return
@@ -90,7 +90,7 @@ func TestNormalizeURLInvalidInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := normalizeURL(tt.inputURL)
+			result, err := NormalizeURL(tt.inputURL)
 			if result != "" || (err == nil && !strings.Contains(err.Error(), tt.expected.Error())) {
 				t.Errorf("normalizeURL(%q) error = %v, wantErr %v", tt.inputURL, err, tt.expected)
 			}
