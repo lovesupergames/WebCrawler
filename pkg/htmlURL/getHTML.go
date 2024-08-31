@@ -1,31 +1,34 @@
 package htmlURL
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 func GetHTML(rawURL string) (string, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+	res, err := http.Get(rawURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("got Network error: %v", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	defer res.Body.Close()
+
+	if res.StatusCode > 399 {
+		return "", fmt.Errorf("got HTTP error: %s", res.Status)
+	}
+
+	contentType := res.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		return "", fmt.Errorf("got non-HTML response: %s", contentType)
+	}
+
+	htmlBodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("couldn't read response body: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return "", errors.New(resp.Status)
-	}
-	contentType := resp.Header.Get("Content-Type")
-	if contentType != "text/html" {
-		return "", errors.New(resp.Status)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+
+	htmlBody := string(htmlBodyBytes)
+
+	return htmlBody, nil
 }
