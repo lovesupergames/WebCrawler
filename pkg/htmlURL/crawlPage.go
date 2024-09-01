@@ -3,92 +3,88 @@ package htmlURL
 import (
 	"fmt"
 	"net/url"
+	"sync"
 )
 
-func CrawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
+type Config struct {
+	MaxPages           int
+	Pages              map[string]int
+	BaseURL            *url.URL
+	Mu                 *sync.Mutex
+	ConcurrencyControl chan struct{}
+	Wg                 *sync.WaitGroup
+}
 
-	// выходим если имя домена у базы и курент не совпадают
-	parseBase, errParse := url.Parse(rawBaseURL)
-	if errParse != nil {
-		fmt.Println(errParse)
-		return
-	}
-	parseCurrent, errParse := url.Parse(rawCurrentURL)
-	if errParse != nil {
-		fmt.Println(errParse)
-		return
-	}
-	if parseBase.Host != parseCurrent.Host {
+func (cfg *Config) CrawlPage(rawCurrentURL string) {
+
+	cfg.ConcurrencyControl <- struct{}{}
+
+	defer func() {
+		<-cfg.ConcurrencyControl
+		cfg.Wg.Done()
+	}()
+
+	if cfg.PagesLen() >= cfg.MaxPages {
 		return
 	}
 
-	//нормализовали и добавили курентЮРЛ в паджес
-	normUrl, err := NormalizeURL(rawCurrentURL)
+	currentURL, err := url.Parse(rawCurrentURL)
 	if err != nil {
-		fmt.Println(err)
-	}
-	// increment if visited
-	if _, visited := pages[normUrl]; visited {
-		pages[normUrl]++
+		fmt.Printf("Error - crawlPage: couldn't parse URL '%s': %v\n", rawCurrentURL, err)
 		return
 	}
-	pages[normUrl] = 1
 
+	// skip other websites
+	if currentURL.Hostname() != cfg.BaseURL.Hostname() {
+		return
+	}
+
+	normalizedURL, err := NormalizeURL(rawCurrentURL)
+	if err != nil {
+		fmt.Printf("Error - normalizedURL: %v", err)
+		return
+	}
+
+	isFirst := cfg.AddPageVisit(normalizedURL)
+	if !isFirst {
+		return
+	}
 	fmt.Printf("crawling %s\n", rawCurrentURL)
 
-	// получили содержание страницы
-	body, errHTML := GetHTML(rawCurrentURL)
-	if errHTML != nil {
-		fmt.Println(errHTML)
+	htmlBody, err := GetHTML(rawCurrentURL)
+	if err != nil {
+		fmt.Printf("Error - getHTML: %v", err)
 		return
 	}
-	//распарсили на ссылки
-	urlSlice, errURLS := GetURLsFromHTML(body, rawCurrentURL)
-	if errURLS != nil {
-		fmt.Println(errURLS)
+
+	nextURLs, err := GetURLsFromHTML(htmlBody, cfg.BaseURL)
+	if err != nil {
+		fmt.Printf("Error - getURLsFromHTML: %v", err)
 	}
 
-	//	//добавили все ссылки
-	//	for _, link := range urlSlice {
-	//		parsedLink, errParse := url.Parse(link)
-	//		if errParse != nil {
-	//			fmt.Println(errParse)
-	//			continue
-	//		}
-	//		if parsedLink.Host == parseBase.Host {
-	//			normLink, errLink := NormalizeURL(link)
-	//			if errLink != nil {
-	//				fmt.Println(errLink)
-	//				return
-	//			}
-	//
-	//			if _, ok := pages[normLink]; !ok {
-	//				pages[normLink] = 1
-	//			} else {
-	//				pages[normLink]++
-	//			}
-	//		}
-	//
-	//	}
-	//
-	//	//получили ссылку из мапы
-	//	for key, value := range pages {
-	//		// выходим если уже были в этой ссылке
-	//
-	//		if value > 1 {
-	//			continue
-	//		}
-	//
-	//		normalURL, errURL := NormalizeURL(key)
-	//		if errURL != nil {
-	//			fmt.Println(errURL)
-	//			return
-	//		}
-	//		CrawlPage(rawBaseURL, normalURL, pages)
-	//
-	//	}
-	//}
-	for _, nextURL := range urlSlice {
-		CrawlPage(rawBaseURL, nextURL, pages)
+	for _, nextURL := range nextURLs {
+		cfg.Wg.Add(1)
+		go cfg.CrawlPage(nextURL)
 	}
+
+}
+
+func (cfg *Config) AddPageVisit(normalizedURL string) (isFirst bool) {
+	cfg.Mu.Lock()
+	defer cfg.Mu.Unlock()
+	// increment if visited
+	if _, visited := cfg.Pages[normalizedURL]; visited {
+		cfg.Pages[normalizedURL]++
+		return false
+	}
+
+	// mark as visited
+	cfg.Pages[normalizedURL] = 1
+	return true
+}
+
+func (cfg *Config) PagesLen() int {
+	cfg.Mu.Lock()
+	defer cfg.Mu.Unlock()
+	return len(cfg.Pages)
 }
